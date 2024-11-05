@@ -1,7 +1,8 @@
-// CPL Assignment 3 - heap management
+//  heap management
 
 #include<stdio.h>
 #include<stdlib.h>
+#include <time.h>
 // Total size of the heap
 #define HEAP_SIZE 4096
 // Fibonacci list for size of free-Lists
@@ -14,13 +15,27 @@
 struct Node
 {
 	int data;
+	int refCount;
+	int marked;
 	struct Node * next;
 };
+
+struct NodeAddress {
+    struct Node* nodePtr;
+    struct NodeAddress* next;
+} *globalNodeList = NULL;
+
 // Function used for Linked list
 void insertAtStart(struct Node **ptr, int data);
 void deleteList(struct Node *ptr);
 void printLL(struct Node *ptr);
+void printglobal(struct NodeAddress *ptr);
 void reversal(struct Node **hptr);
+void randomlyDisconnectNode(struct Node** head);
+void refCountGarbageCollect(struct Node** head);
+void mark(struct Node* node);
+void sweep(struct Node** head);
+void disconnectLastThreeNodes(struct Node** head);
 
 
 // structure is used for heap management
@@ -61,12 +76,14 @@ int getLowFiboIndex(int n);
 
 int main (void)
 {
+    srand(time(NULL));
+    
     create_heap();
     printf("printing free list after allocation...\n");
     print();
     newLine;
     struct Node *head = NULL;
-    for(int i = 0; i < 300; i++)
+    for(int i = 0; i < 50; i++)
     {
         insertAtStart(&head,i+1);
     }
@@ -80,7 +97,57 @@ int main (void)
     printf("printing free list after creating linked list...\n");
     print();
     newLine;
-    printf("deleting linked list....\n");
+    printf("---------------------------------------------------------");
+    newLine;
+    printf("Reference Counting Garbage Collection!");
+    newLine;
+    printf("---------------------------------------------------------");
+    newLine;
+    randomlyDisconnectNode(&head);
+    newLine;
+    printLL(head);
+    printf("\nCollecting Garbage\n");
+    newLine;
+    refCountGarbageCollect(&head);
+    newLine;
+    printf("Done Collecting Garbage\n");
+    newLine;
+    
+    printf("printing linked list after reference counting garbage collection...\n");
+    printLL(head);
+    newLine;
+    printf("printing free list after reference counting garbage collection...\n");
+    print();
+    newLine;
+    printf("---------------------------------------------------------");
+    newLine;
+    printf("Mark and Sweep Garbage Collection!");
+    newLine;
+    printf("---------------------------------------------------------");
+    newLine;
+    disconnectLastThreeNodes(&head);
+    newLine;
+    printLL(head);
+    newLine;
+    mark(head);
+    printf("Marking Done...\n\n");
+    sweep(&head);
+    printf("After Sweeping...\n");
+    newLine;
+    
+    printf("printing linked list after mark-and-sweep garbage collection...\n");
+    printLL(head);
+    newLine;
+    printf("printing free list after mark-and-sweep garbage collection...\n");
+    print();
+    newLine;
+    
+    printf("---------------------------------------------------------");
+    newLine;
+    printf("Deleting Linked List!");
+    newLine;
+    printf("---------------------------------------------------------");
+    newLine;
 	deleteList(head);
     printf("printing free list after deleting linked list...\n");
     print();
@@ -283,6 +350,16 @@ int total()
     return sum;
 }
 
+void addToGlobalList(struct Node* node) {
+    struct NodeAddress* newAddress = (struct NodeAddress*)malloc(sizeof(struct NodeAddress));
+    if (newAddress != NULL) {
+        newAddress->nodePtr = node;
+        newAddress->next = globalNodeList;
+        globalNodeList = newAddress;
+    }
+}
+
+
 // Function definition for linked list
 void insertAtStart(struct Node **ptr, int data)
 {
@@ -291,13 +368,30 @@ void insertAtStart(struct Node **ptr, int data)
 	if(temp != NULL)
 	{
 		temp->data = data;
+		temp->refCount = 1;
+		temp->marked = 0;
 		temp->next = *ptr;
+		if (*ptr != NULL) {
+            (*ptr)->refCount++; // Increase refCount for the next node
+        }
 		*ptr = temp;
+		addToGlobalList(temp);
 	}
     else
     {
         printf("cannot allocate memory\n");
     }
+}
+
+void printglobal(struct NodeAddress *ptr)
+{
+    printf("Peinting Gloabal\n");
+    while (ptr != NULL)
+    {
+        printf("%d ",ptr->nodePtr->data);
+        ptr = ptr->next;
+    }
+    printf("\n");
 }
 
 void printLL(struct Node *ptr)
@@ -338,4 +432,131 @@ void deleteList(struct Node *ptr)
 		freeMemory(ptr);
 		ptr = temp;
 	}
+}
+
+void randomlyDisconnectNode(struct Node** head) {
+    int count = 0;
+    struct Node* temp = *head;
+    struct Node* prev = NULL;
+
+    // Count the number of nodes
+    while (temp != NULL) {
+        count++;
+        temp = temp->next;
+    }
+
+    if (count == 0) return; // No nodes to dereference
+
+    // Choose a random node index
+    int targetIndex = rand() % count;
+    temp = *head;
+
+    for (int i = 0; i < targetIndex; i++) {
+        prev = temp;
+        temp = temp->next;
+    }
+
+    // Dereference and disconnect the randomly chosen node
+    printf("Randomly dereferencing node with data %d\n", temp->data);
+    temp->refCount = 0;
+
+    if (prev != NULL) {
+        prev->next = temp->next;
+    } else {
+        *head = temp->next;
+    }
+}
+
+
+// Garbage collection function to delete nodes with refCount zero
+void refCountGarbageCollect(struct Node** head) {
+    struct NodeAddress* currentAddress = globalNodeList;
+    struct NodeAddress* prevAddress = NULL;
+
+    while (currentAddress != NULL) {
+        struct Node* node = currentAddress->nodePtr;
+
+        // Check if the node's refCount is zero
+        if (node->refCount == 0) {
+            printf("Garbage collecting node with data %d\n", node->data);
+           if (prevAddress != NULL) {
+                prevAddress->next = currentAddress->next;
+            } else {
+                globalNodeList = currentAddress->next;
+            }
+            struct NodeAddress* tempAddress = currentAddress;
+            
+            currentAddress = currentAddress->next;
+            
+            // Free the memory and the global node list entry
+            freeMemory(node);
+            free(tempAddress);
+        } else {
+            prevAddress = currentAddress;
+        
+            currentAddress = currentAddress->next;
+        }
+    }
+}
+
+void mark(struct Node* node) {
+    while (node != NULL && node->marked == 0) {
+        node->marked = 1; // Mark the node as reachable
+        node = node->next;
+    }
+}
+
+void sweep(struct Node** head) {
+    struct NodeAddress* currentAddress = globalNodeList;
+    struct NodeAddress* prevAddress = NULL;
+    // first 
+    while (currentAddress != NULL) {
+        struct Node* node = currentAddress->nodePtr;
+        
+        // Check if the node's marked flag is false
+        if (node->marked == 0) {
+            printf("Sweeping node with data %d\n", node->data);
+            
+            // Disconnect the node from globalNodeList
+            if (prevAddress != NULL) {
+                prevAddress->next = currentAddress->next;
+            } else {
+                globalNodeList = currentAddress->next;
+            }
+            
+            struct NodeAddress* tempAddress = currentAddress;
+            
+            currentAddress = currentAddress->next;
+            
+            // Free the memory and the global node list entry
+            freeMemory(node);
+            free(tempAddress);
+            
+        } else {
+            node->marked = 0; // Reset the mark for future GC cycles
+            prevAddress = currentAddress;
+            currentAddress = currentAddress->next;
+        }
+    }
+}
+
+void disconnectLastThreeNodes(struct Node** head) {
+    struct Node* temp = *head;
+    int count = 0;
+    
+    // Count the total number of nodes
+    while (temp != NULL) {
+        count++;
+        temp = temp->next;
+    }
+    
+    if (count < 3) return; // Not enough nodes to disconnect
+    
+    temp = *head;
+    for (int i = 0; i < count - 3; i++) {
+        temp = temp->next;
+    }
+    
+    printf("Disconnecting last nodes...\n");
+    temp->next = NULL;
 }
